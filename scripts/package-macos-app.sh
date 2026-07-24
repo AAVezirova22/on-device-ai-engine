@@ -57,5 +57,5 @@ test -x "${MACOS_DIR}/edgeai-hotkey"
 test -f "${CONTENTS_DIR}/Info.plist"
 /usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "${CONTENTS_DIR}/Info.plist" >/dev/null
 
-echo "Packaged unsigned app: ${APP_DIR}"
+echo "Packaged app: ${APP_DIR}"
 echo "To run: open \"${APP_DIR}\""

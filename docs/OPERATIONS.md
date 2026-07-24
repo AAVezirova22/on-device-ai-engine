@@ -31,7 +31,7 @@ swift test
 scripts/smoke-test.sh
 ```
 
-The smoke test builds the package, checks resource reporting, indexes sample documents, inspects the index, runs retrieval-only search, runs answer commands, verifies JSON output, and runs a small benchmark.
+The smoke test builds the package, creates a temporary local fixture corpus, checks resource reporting, indexes the fixture documents, inspects the index, runs retrieval-only search, runs answer commands, verifies JSON output, and runs a small benchmark.
 
 ## Release check
 
@@ -45,7 +45,7 @@ The release check runs tests, the smoke test, a release build, and sanity checks
 
 ```bash
 swift run edgeai index \
-  --input sample_docs \
+  --input ~/Documents/Notes \
   --output .edgeai/index.json
 ```
 
@@ -62,6 +62,13 @@ Useful options:
 
 - `--embedding hash`: deterministic portable embedding backend.
 - `--embedding natural`: Apple NaturalLanguage semantic embedding backend.
+- `--search-mode exact`: exact vector search.
+- `--search-mode approximate`: locality-sensitive hashing candidate retrieval.
+- `--search-mode auto`: exact search for smaller indexes, approximate search for larger indexes.
+- `--scoring swift`: pure Swift dot-product scoring.
+- `--scoring native-cxx`: native C++ dot-product scoring.
+- `--scoring metal`: Metal compute dot-product scoring.
+- `--scoring auto`: Metal when available, otherwise native C++.
 - `--target-words 180`: approximate chunk size.
 - `--overlap-words 36`: repeated context between chunks.
 - `--max-input-mb 50`: max total input text size.
@@ -75,7 +82,7 @@ Create a config:
 ```bash
 swift run edgeai init-config \
   --output .edgeai/config.json \
-  --input sample_docs
+  --input ~/Documents/Notes
 ```
 
 Show the active config:
@@ -106,6 +113,27 @@ The config stores:
 - retrieval settings,
 - generation settings,
 - resource limits.
+
+## Runtime support
+
+Inspect runtime support in the current build:
+
+```bash
+swift run edgeai runtimes
+```
+
+JSON:
+
+```bash
+swift run edgeai runtimes --json
+```
+
+The runtime registry reports:
+
+- built-in extractive local fallback,
+- local llama.cpp server mode,
+- native llama.cpp build-time integration status,
+- MLX Swift build-time integration status.
 
 ## Inspect an index
 
@@ -147,14 +175,14 @@ Use this when answer quality is weak. If retrieval is poor, the model cannot ans
 Default portable backend:
 
 ```bash
-swift run edgeai index --input sample_docs --embedding hash
+swift run edgeai index --input ~/Documents/Notes --embedding hash
 ```
 
 Semantic Apple local backend:
 
 ```bash
 swift run edgeai index \
-  --input sample_docs \
+  --input ~/Documents/Notes \
   --output .edgeai/natural-index.json \
   --embedding natural
 ```
@@ -162,6 +190,36 @@ swift run edgeai index \
 Use `natural` when the machine supports Apple NaturalLanguage embeddings and you want better semantic matching. Use `hash` when you need deterministic behavior across machines or CI.
 
 The embedding backend is stored in the index manifest. Query commands use the manifest backend automatically.
+
+## Search mode and scoring backend
+
+Exact search scans every vector:
+
+```bash
+swift run edgeai search \
+  --index .edgeai/index.json \
+  --query "thermal safeguards" \
+  --search-mode exact
+```
+
+Approximate search uses locality-sensitive hashing to select a candidate set, then scores those candidates exactly:
+
+```bash
+swift run edgeai search \
+  --index .edgeai/index.json \
+  --query "thermal safeguards" \
+  --search-mode approximate \
+  --scoring native-cxx
+```
+
+Use Metal scoring on Apple Silicon:
+
+```bash
+swift run edgeai search \
+  --index .edgeai/index.json \
+  --query "thermal safeguards" \
+  --scoring metal
+```
 
 ## Ask questions
 
@@ -232,12 +290,13 @@ The doctor checks:
 - embedding backend availability,
 - index schema/dimensions,
 - llama.cpp connectivity when a server URL is configured.
+- local runtime availability.
 
 ## Benchmark
 
 ```bash
 swift run edgeai benchmark \
-  --input sample_docs \
+  --input ~/Documents/Notes \
   --query "thermal safeguards" \
   --iterations 25
 ```
@@ -246,7 +305,7 @@ JSON:
 
 ```bash
 swift run edgeai benchmark \
-  --input sample_docs \
+  --input ~/Documents/Notes \
   --query "thermal safeguards" \
   --iterations 25 \
   --json
@@ -363,7 +422,7 @@ open "dist/On-Device AI Engine.app"
 
 Current packaging status:
 
-- creates a valid unsigned `.app` bundle,
+- creates a valid `.app` bundle,
 - includes `Info.plist`,
 - runs as an agent/menu-bar app via `LSUIElement`,
 - uses the release `edgeai-hotkey` binary.

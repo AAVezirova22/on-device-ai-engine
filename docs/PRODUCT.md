@@ -6,7 +6,7 @@ On-Device AI Engine
 
 ## What it is
 
-On-Device AI Engine is a privacy-first local AI productivity assistant for macOS. It indexes local documents, retrieves relevant passages, and uses a local language-model backend to answer questions, summarize text, or extract action items without sending private files to a cloud service.
+On-Device AI Engine is a privacy-first local AI productivity assistant for Apple platforms. It indexes local documents, retrieves relevant passages, and uses a local language-model backend to answer questions, summarize text, or extract action items without sending private files to a cloud service.
 
 The current implementation is a production-oriented native Swift foundation:
 
@@ -17,17 +17,22 @@ The current implementation is a production-oriented native Swift foundation:
 - llama.cpp server integration,
 - local GGUF model metadata and llama-server command generation,
 - Apple NaturalLanguage semantic embeddings as an optional local retrieval backend,
+- native C++ vector scoring through SwiftPM,
+- runtime Metal vector scoring,
+- approximate nearest-neighbor retrieval with locality-sensitive hashing,
 - deterministic offline fallback,
 - macOS global-hotkey clipboard summarization menu-bar app,
-- packaged unsigned macOS app artifact,
+- SwiftUI iOS workspace UI,
+- packaged macOS app artifact,
 - configurable global hotkey,
 - Launch at Login support for signed builds,
 - privacy and permissions onboarding,
 - Preferences UI for embedding and hotkey settings,
-- resource guardrails for memory and thermal pressure.
-- resource and benchmark commands for operational visibility.
-- doctor readiness checks for local setup validation.
+- resource guardrails for memory and thermal pressure,
+- resource and benchmark commands for operational visibility,
+- doctor readiness checks for local setup validation,
 - JSON configuration files for repeatable local workflows.
+- local runtime capability reporting.
 
 ## Who it helps
 
@@ -37,7 +42,7 @@ They can query project notes, contracts, specifications, or meeting notes locall
 
 ### Developers
 
-They can index technical docs, architecture notes, TODO files, and code-adjacent Markdown, then ask questions with source citations.
+They can index technical docs, architecture notes, planning files, and code-adjacent Markdown, then ask questions with source citations.
 
 ### Students and researchers
 
@@ -96,20 +101,25 @@ llama-server -m ./models/model.gguf --host 127.0.0.1 --port 8080
 
 Do not point `--llama-server` at a remote service if the indexed documents are private.
 
-## Current production boundary
+## Implemented capabilities
 
-Implemented:
+The repository implements a native local RAG engine with operational tooling:
 
 - Native Swift package.
+- SwiftUI iOS workspace target.
 - Local file ingestion.
 - Local vector index persisted as JSON.
+- Exact and approximate vector search.
+- Native C++ dot-product scoring.
+- Runtime Metal compute dot-product scoring.
 - Schema/version validation for indexes.
 - Manifest metadata with source document fingerprints.
 - CLI commands for indexing, retrieval, answering, inspection, JSON output, and versioning.
-- Unit tests and smoke-test script.
+- Unit tests, smoke-test script, and release-check script.
 - Local llama.cpp server adapter.
 - Model metadata and llama-server command generation commands.
 - Unsigned macOS menu-bar app packaging.
+- Developer ID signing and notarization script for credentialed distribution.
 - Configurable hotkey support through `.edgeai/config.json`.
 - Launch at Login menu support through ServiceManagement.
 - Privacy and permissions onboarding in the menu-bar app.
@@ -117,16 +127,6 @@ Implemented:
 - Runtime thermal/memory snapshots.
 - Benchmark command for indexing and retrieval latency.
 - Doctor command for config/index/backend readiness checks.
+- Runtime command for local generation backend visibility.
 - Configuration file support with CLI override precedence.
 - Optional Apple NaturalLanguage semantic embedding backend.
-
-Not yet implemented:
-
-- Direct C++ llama.cpp bindings.
-- MLX Swift model execution.
-- Custom Metal kernels.
-- Approximate nearest-neighbor indexing.
-- Signed and notarized macOS app bundle.
-- iOS UI.
-
-This distinction matters. The repo is useful and demonstrable now, but custom Metal/MLX inference should be treated as a future milestone unless those modules are added.

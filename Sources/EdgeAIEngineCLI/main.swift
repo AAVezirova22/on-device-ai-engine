@@ -24,6 +24,8 @@ struct EdgeAICommand {
                 try benchmark(arguments: Array(arguments.dropFirst()))
             case "resources":
                 try resources(arguments: Array(arguments.dropFirst()))
+            case "runtimes":
+                try runtimes(arguments: Array(arguments.dropFirst()))
             case "doctor":
                 try await doctor(arguments: Array(arguments.dropFirst()))
             case "model-info":
@@ -91,8 +93,11 @@ struct EdgeAICommand {
         let question = parser.value(for: "--question") ?? parser.positionalArguments.joined(separator: " ")
         let topK = parser.intValue(for: "--top-k") ?? configuration.retrieval.topK
         let minimumScore = parser.floatValue(for: "--min-score") ?? configuration.retrieval.minimumScore
+        let searchMode = try parser.searchModeValue(for: "--search-mode") ?? configuration.retrieval.searchMode
+        let scoringBackend = try parser.scoringBackendValue(for: "--scoring") ?? configuration.retrieval.scoringBackend
         let maxTokens = parser.intValue(for: "--max-tokens") ?? configuration.generation.maxTokens
         let temperature = parser.doubleValue(for: "--temperature") ?? configuration.generation.temperature
+        let runtime = try parser.runtimeKindValue(for: "--runtime") ?? configuration.generation.runtime
         let json = parser.hasFlag("--json")
 
         guard !question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -106,11 +111,15 @@ struct EdgeAICommand {
         )
         let llm: LocalLLM
 
-        if let llamaServer = parser.value(for: "--llama-server") ?? configuration.generation.llamaServerURL {
+        if runtime == .llamaCppServer || parser.value(for: "--llama-server") != nil || configuration.generation.llamaServerURL != nil {
+            let llamaServer = parser.value(for: "--llama-server") ?? configuration.generation.llamaServerURL ?? configuration.generation.effectiveServerURL
             guard let url = URL(string: llamaServer), url.scheme != nil else {
                 throw CLIError.message("--llama-server must be a valid URL, for example http://127.0.0.1:8080")
             }
             llm = LlamaCppServerClient(baseURL: url)
+        } else if runtime == .nativeLlamaCpp || runtime == .mlxSwift {
+            let status = LocalRuntimeRegistry.status(for: runtime)
+            throw CLIError.message("\(runtime.rawValue) runtime is not available for direct CLI generation in this build. \(status.detail)")
         } else {
             llm = ExtractiveLocalLLM()
         }
@@ -126,6 +135,8 @@ struct EdgeAICommand {
             options: RAGOptions(
                 topK: topK,
                 minimumScore: minimumScore,
+                searchMode: searchMode,
+                scoringBackend: scoringBackend,
                 llmOptions: LLMOptions(maxTokens: maxTokens, temperature: temperature)
             )
         )
@@ -149,6 +160,8 @@ struct EdgeAICommand {
         let query = parser.value(for: "--query") ?? parser.positionalArguments.joined(separator: " ")
         let topK = parser.intValue(for: "--top-k") ?? configuration.retrieval.topK
         let minimumScore = parser.floatValue(for: "--min-score") ?? configuration.retrieval.minimumScore
+        let searchMode = try parser.searchModeValue(for: "--search-mode") ?? configuration.retrieval.searchMode
+        let scoringBackend = try parser.scoringBackendValue(for: "--scoring") ?? configuration.retrieval.scoringBackend
         let json = parser.hasFlag("--json")
 
         guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -166,7 +179,13 @@ struct EdgeAICommand {
             llm: ExtractiveLocalLLM(),
             resourceGuard: resourceGuard(parser: parser, configuration: configuration)
         )
-        let results = try engine.retrieve(question: query, topK: topK, minimumScore: minimumScore)
+        let results = try engine.retrieve(
+            question: query,
+            topK: topK,
+            minimumScore: minimumScore,
+            searchMode: searchMode,
+            scoringBackend: scoringBackend
+        )
 
         if json {
             try printJSON(SearchCommandResponse(query: query, citations: results.map(CitationResponse.init)))
@@ -221,6 +240,8 @@ struct EdgeAICommand {
         let query = parser.value(for: "--query") ?? "What are the action items?"
         let iterations = max(1, parser.intValue(for: "--iterations") ?? 25)
         let topK = parser.intValue(for: "--top-k") ?? configuration.retrieval.topK
+        let searchMode = try parser.searchModeValue(for: "--search-mode") ?? configuration.retrieval.searchMode
+        let scoringBackend = try parser.scoringBackendValue(for: "--scoring") ?? configuration.retrieval.scoringBackend
         let json = parser.hasFlag("--json")
 
         guard !inputPaths.isEmpty else {
@@ -251,7 +272,12 @@ struct EdgeAICommand {
 
         for _ in 0..<iterations {
             let start = DispatchTime.now()
-            _ = try engine.retrieve(question: query, topK: topK)
+            _ = try engine.retrieve(
+                question: query,
+                topK: topK,
+                searchMode: searchMode,
+                scoringBackend: scoringBackend
+            )
             retrievalDurations.append(elapsedMilliseconds(since: start))
         }
 
@@ -290,6 +316,21 @@ struct EdgeAICommand {
             print("Thermal state: \(snapshot.thermalState)")
             print("Physical memory: \(format(bytes: snapshot.physicalMemoryBytes))")
             print("Resident memory: \(format(bytes: snapshot.residentMemoryBytes))")
+        }
+    }
+
+    private static func runtimes(arguments: [String]) throws {
+        let parser = ArgumentParser(arguments)
+        let statuses = LocalRuntimeRegistry.statuses()
+
+        if parser.hasFlag("--json") {
+            try printJSON(RuntimeStatusResponse(runtimes: statuses))
+            return
+        }
+
+        for status in statuses {
+            let availability = status.available ? "available" : "unavailable"
+            print("[\(availability)] \(status.kind.rawValue): \(status.detail)")
         }
     }
 
@@ -410,6 +451,16 @@ struct EdgeAICommand {
             checks.append(DoctorCheck(name: "model", status: .warn, detail: "No model path configured. Use --model or set generation.modelPath."))
         }
 
+        for status in LocalRuntimeRegistry.statuses() {
+            checks.append(
+                DoctorCheck(
+                    name: "runtime:\(status.kind.rawValue)",
+                    status: status.available ? .pass : .warn,
+                    detail: status.detail
+                )
+            )
+        }
+
         let report = DoctorReport(checks: checks)
         try emitDoctorReport(report, json: parser.hasFlag("--json"))
 
@@ -436,7 +487,12 @@ struct EdgeAICommand {
         let configuration = EdgeAIConfiguration(
             inputPaths: parser.values(for: "--input"),
             embeddingModel: parser.value(for: "--embedding") ?? EdgeAIConfiguration.default.embeddingModel,
+            retrieval: RetrievalConfiguration(
+                searchMode: try parser.searchModeValue(for: "--search-mode") ?? EdgeAIConfiguration.default.retrieval.searchMode,
+                scoringBackend: try parser.scoringBackendValue(for: "--scoring") ?? EdgeAIConfiguration.default.retrieval.scoringBackend
+            ),
             generation: GenerationConfiguration(
+                runtime: try parser.runtimeKindValue(for: "--runtime") ?? EdgeAIConfiguration.default.generation.runtime,
                 llamaServerURL: parser.value(for: "--llama-server"),
                 modelPath: parser.value(for: "--model"),
                 host: parser.value(for: "--host") ?? EdgeAIConfiguration.default.generation.host,
@@ -524,6 +580,7 @@ struct EdgeAICommand {
           edgeai inspect [--index .edgeai/index.json]
           edgeai benchmark --input <path> [--query "..."]
           edgeai resources
+          edgeai runtimes
           edgeai doctor [--config .edgeai/config.json]
           edgeai model-info [--model ./models/model.gguf]
           edgeai llama-command [--model ./models/model.gguf]
@@ -534,6 +591,9 @@ struct EdgeAICommand {
         Optional:
           --config .edgeai/config.json             Load JSON configuration. CLI flags override config values.
           --embedding hash|natural                 Embedding backend for new indexes.
+          --search-mode exact|approximate|auto     Retrieval search mode.
+          --scoring auto|swift|native-cxx|metal    Dot-product scoring backend.
+          --runtime extractive|llama.cpp-server|native-llama.cpp|mlx-swift
           --llama-server http://127.0.0.1:8080  Use a local llama.cpp server instead of the extractive fallback.
           --model ./models/model.gguf            Local GGUF model path metadata.
           --host 127.0.0.1                       llama.cpp host.
@@ -665,6 +725,36 @@ struct ArgumentParser {
         value(for: flag).flatMap(Double.init)
     }
 
+    func searchModeValue(for flag: String) throws -> VectorSearchMode? {
+        guard let rawValue = value(for: flag) else {
+            return nil
+        }
+        guard let mode = VectorSearchMode(rawValue: rawValue) else {
+            throw CLIError.message("Invalid \(flag) value: \(rawValue). Supported values: exact, approximate, auto.")
+        }
+        return mode
+    }
+
+    func scoringBackendValue(for flag: String) throws -> VectorScoringBackend? {
+        guard let rawValue = value(for: flag) else {
+            return nil
+        }
+        guard let backend = VectorScoringBackend(rawValue: rawValue) else {
+            throw CLIError.message("Invalid \(flag) value: \(rawValue). Supported values: auto, swift, native-cxx, metal.")
+        }
+        return backend
+    }
+
+    func runtimeKindValue(for flag: String) throws -> LocalRuntimeKind? {
+        guard let rawValue = value(for: flag) else {
+            return nil
+        }
+        guard let runtime = LocalRuntimeKind(rawValue: rawValue) else {
+            throw CLIError.message("Invalid \(flag) value: \(rawValue). Supported values: extractive, llama.cpp-server, native-llama.cpp, mlx-swift.")
+        }
+        return runtime
+    }
+
     func values(for flag: String) -> [String] {
         arguments.indices.compactMap { index in
             guard arguments[index] == flag,
@@ -687,6 +777,7 @@ struct ArgumentParser {
             "--question", "--query", "--top-k", "--min-score", "--llama-server",
             "--max-input-mb", "--max-resident-mb", "--max-tokens", "--temperature", "--iterations",
             "--embedding",
+            "--search-mode", "--scoring", "--runtime",
             "--config", "--model", "--host", "--port", "--context-size", "--llama-executable"
         ]
 
@@ -770,6 +861,10 @@ struct ModelInfoResponse: Codable {
 struct LlamaCommandResponse: Codable {
     let command: [String]
     let serverURL: String
+}
+
+struct RuntimeStatusResponse: Codable {
+    let runtimes: [LocalRuntimeStatus]
 }
 
 enum DoctorStatus: String, Codable {

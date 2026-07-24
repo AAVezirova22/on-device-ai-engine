@@ -59,14 +59,39 @@ public struct EdgeAIConfiguration: Codable, Equatable {
 public struct RetrievalConfiguration: Codable, Equatable {
     public var topK: Int
     public var minimumScore: Float
+    public var searchMode: VectorSearchMode
+    public var scoringBackend: VectorScoringBackend
 
-    public init(topK: Int = 5, minimumScore: Float = 0.01) {
+    public init(
+        topK: Int = 5,
+        minimumScore: Float = 0.01,
+        searchMode: VectorSearchMode = .exact,
+        scoringBackend: VectorScoringBackend = .auto
+    ) {
         self.topK = topK
         self.minimumScore = minimumScore
+        self.searchMode = searchMode
+        self.scoringBackend = scoringBackend
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case topK
+        case minimumScore
+        case searchMode
+        case scoringBackend
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.topK = try container.decodeIfPresent(Int.self, forKey: .topK) ?? Self().topK
+        self.minimumScore = try container.decodeIfPresent(Float.self, forKey: .minimumScore) ?? Self().minimumScore
+        self.searchMode = try container.decodeIfPresent(VectorSearchMode.self, forKey: .searchMode) ?? Self().searchMode
+        self.scoringBackend = try container.decodeIfPresent(VectorScoringBackend.self, forKey: .scoringBackend) ?? Self().scoringBackend
     }
 }
 
 public struct GenerationConfiguration: Codable, Equatable {
+    public var runtime: LocalRuntimeKind
     public var llamaServerURL: String?
     public var modelPath: String?
     public var host: String
@@ -76,6 +101,7 @@ public struct GenerationConfiguration: Codable, Equatable {
     public var temperature: Double
 
     public init(
+        runtime: LocalRuntimeKind = .extractive,
         llamaServerURL: String? = nil,
         modelPath: String? = nil,
         host: String = "127.0.0.1",
@@ -84,6 +110,7 @@ public struct GenerationConfiguration: Codable, Equatable {
         maxTokens: Int = 512,
         temperature: Double = 0.2
     ) {
+        self.runtime = runtime
         self.llamaServerURL = llamaServerURL
         self.modelPath = modelPath
         self.host = host
@@ -91,6 +118,29 @@ public struct GenerationConfiguration: Codable, Equatable {
         self.contextSize = contextSize
         self.maxTokens = maxTokens
         self.temperature = temperature
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case runtime
+        case llamaServerURL
+        case modelPath
+        case host
+        case port
+        case contextSize
+        case maxTokens
+        case temperature
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.runtime = try container.decodeIfPresent(LocalRuntimeKind.self, forKey: .runtime) ?? Self().runtime
+        self.llamaServerURL = try container.decodeIfPresent(String.self, forKey: .llamaServerURL)
+        self.modelPath = try container.decodeIfPresent(String.self, forKey: .modelPath)
+        self.host = try container.decodeIfPresent(String.self, forKey: .host) ?? Self().host
+        self.port = try container.decodeIfPresent(Int.self, forKey: .port) ?? Self().port
+        self.contextSize = try container.decodeIfPresent(Int.self, forKey: .contextSize) ?? Self().contextSize
+        self.maxTokens = try container.decodeIfPresent(Int.self, forKey: .maxTokens) ?? Self().maxTokens
+        self.temperature = try container.decodeIfPresent(Double.self, forKey: .temperature) ?? Self().temperature
     }
 
     public var effectiveServerURL: String {

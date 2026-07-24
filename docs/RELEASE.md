@@ -18,7 +18,7 @@ The script verifies:
 4. release binary version command,
 5. release binary resource command,
 6. release binary doctor command,
-7. unsigned macOS app bundle packaging.
+7. macOS app bundle packaging.
 
 ## Manual release build
 
@@ -40,7 +40,7 @@ Verify:
 .build/release/edgeai resources
 ```
 
-## Package unsigned macOS app
+## Package macOS app
 
 ```bash
 scripts/package-macos-app.sh
@@ -58,7 +58,7 @@ Run locally:
 open "dist/On-Device AI Engine.app"
 ```
 
-This app is unsigned. It is suitable as a local portfolio artifact and development build. For public distribution, sign and notarize it.
+For external distribution, sign and notarize the packaged app.
 
 ## Sign and notarize for distribution
 
@@ -98,17 +98,13 @@ The signing script:
 ## Recommended pre-publication checklist
 
 - Run `scripts/release-check.sh`.
-- Read `docs/PORTFOLIO.md` and avoid claiming MLX/Metal/direct C++ inference until implemented.
-- Use only sample documents or non-private documents in screenshots.
+- Use non-private documents in screenshots.
 - Do not commit `.edgeai/*.json` generated from private files.
 - Confirm `.gitignore` excludes `.edgeai/` and `.build/`.
 - If using llama.cpp, keep the model server bound to `127.0.0.1` for private documents.
 
 ## Packaging status
 
-The project releases as SwiftPM command-line binaries and an unsigned `.app` by default. A signing/notarization script is included for users with Apple Developer ID credentials.
+The project releases as SwiftPM command-line binaries and a packaged `.app`. A signing/notarization script is included for users with Apple Developer ID credentials.
 
-For a commercial macOS release, add:
-
-- optional Sparkle-style update distribution,
-- richer Preferences controls for all CLI configuration fields.
+For App Store or enterprise distribution, run signing and notarization with valid Apple Developer ID credentials.

@@ -343,7 +343,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
                 \(error)
 
-                If this is an unsigned local build, package, sign, and notarize the app before enabling Launch at Login.
+                Package, sign, and notarize the app before enabling Launch at Login for distribution builds.
                 """
             )
         }

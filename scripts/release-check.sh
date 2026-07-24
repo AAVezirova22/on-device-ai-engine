@@ -3,6 +3,7 @@ set -euo pipefail
 
 swift test
 scripts/smoke-test.sh
+swift build --product EdgeAIIOS
 swift build -c release
 .build/release/edgeai version
 .build/release/edgeai resources

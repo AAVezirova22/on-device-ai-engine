@@ -15,11 +15,21 @@ public struct RAGAnswer: Equatable {
 public struct RAGOptions: Equatable {
     public let topK: Int
     public let minimumScore: Float
+    public let searchMode: VectorSearchMode
+    public let scoringBackend: VectorScoringBackend
     public let llmOptions: LLMOptions
 
-    public init(topK: Int = 5, minimumScore: Float = 0.01, llmOptions: LLMOptions = LLMOptions()) {
+    public init(
+        topK: Int = 5,
+        minimumScore: Float = 0.01,
+        searchMode: VectorSearchMode = .exact,
+        scoringBackend: VectorScoringBackend = .auto,
+        llmOptions: LLMOptions = LLMOptions()
+    ) {
         self.topK = topK
         self.minimumScore = minimumScore
+        self.searchMode = searchMode
+        self.scoringBackend = scoringBackend
         self.llmOptions = llmOptions
     }
 }
@@ -58,7 +68,9 @@ public final class RAGEngine {
             query: question,
             using: embeddingModel,
             topK: admittedTopK,
-            minimumScore: options.minimumScore
+            minimumScore: options.minimumScore,
+            mode: options.searchMode,
+            scoringBackend: options.scoringBackend
         )
         let retrievalMilliseconds = elapsedMilliseconds(since: retrievalStart)
 
@@ -67,7 +79,13 @@ public final class RAGEngine {
         return RAGAnswer(answer: answer, citations: matches, retrievalMilliseconds: retrievalMilliseconds)
     }
 
-    public func retrieve(question: String, topK: Int = 5, minimumScore: Float = 0.01) throws -> [RetrievedChunk] {
+    public func retrieve(
+        question: String,
+        topK: Int = 5,
+        minimumScore: Float = 0.01,
+        searchMode: VectorSearchMode = .exact,
+        scoringBackend: VectorScoringBackend = .auto
+    ) throws -> [RetrievedChunk] {
         try resourceGuard.validateSystemForWorkload()
         let admittedTopK = resourceGuard.admittedTopK(requested: topK)
         guard admittedTopK > 0 else {
@@ -78,7 +96,9 @@ public final class RAGEngine {
             query: question,
             using: embeddingModel,
             topK: admittedTopK,
-            minimumScore: minimumScore
+            minimumScore: minimumScore,
+            mode: searchMode,
+            scoringBackend: scoringBackend
         )
     }
 }

@@ -1,7 +1,12 @@
 import Foundation
+import EdgeAINativeKernels
 
 #if canImport(NaturalLanguage)
 import NaturalLanguage
+#endif
+
+#if canImport(Metal)
+import Metal
 #endif
 
 public protocol EmbeddingModel {
@@ -179,9 +184,142 @@ public enum VectorMath {
         return sum
     }
 
+    public static func dot(
+        _ left: [Float],
+        _ right: [Float],
+        backend: VectorScoringBackend
+    ) -> Float {
+        switch backend {
+        case .swift:
+            return dot(left, right)
+        case .nativeCxx:
+            return NativeVectorKernels.dot(left, right)
+        case .metal:
+            return MetalVectorScorer.shared?.dot(left, right) ?? dot(left, right)
+        case .auto:
+            if let metalScore = MetalVectorScorer.shared?.dot(left, right) {
+                return metalScore
+            }
+            return NativeVectorKernels.dot(left, right)
+        }
+    }
+
     public static func l2Normalized(_ vector: [Float]) -> [Float] {
         let magnitude = sqrt(vector.reduce(Float(0)) { $0 + ($1 * $1) })
         guard magnitude > 0 else { return vector }
         return vector.map { $0 / magnitude }
+    }
+}
+
+public enum NativeVectorKernels {
+    public static func dot(_ left: [Float], _ right: [Float]) -> Float {
+        precondition(left.count == right.count, "Vectors must have the same dimensionality.")
+        guard !left.isEmpty else { return 0 }
+
+        return left.withUnsafeBufferPointer { leftPointer in
+            right.withUnsafeBufferPointer { rightPointer in
+                edgeai_dot_product_f32(
+                    leftPointer.baseAddress,
+                    rightPointer.baseAddress,
+                    Int32(left.count)
+                )
+            }
+        }
+    }
+}
+
+public final class MetalVectorScorer {
+    public static let shared = MetalVectorScorer()
+
+    #if canImport(Metal)
+    private let device: MTLDevice
+    private let commandQueue: MTLCommandQueue
+    private let pipeline: MTLComputePipelineState
+    #endif
+
+    private init?() {
+        #if canImport(Metal)
+        guard let device = MTLCreateSystemDefaultDevice(),
+              let commandQueue = device.makeCommandQueue() else {
+            return nil
+        }
+
+        let shader = """
+        #include <metal_stdlib>
+        using namespace metal;
+
+        kernel void edgeai_dot_product(
+            device const float *left [[buffer(0)]],
+            device const float *right [[buffer(1)]],
+            device float *partial [[buffer(2)]],
+            constant uint &count [[buffer(3)]],
+            uint id [[thread_position_in_grid]]
+        ) {
+            if (id < count) {
+                partial[id] = left[id] * right[id];
+            }
+        }
+        """
+
+        guard let library = try? device.makeLibrary(source: shader, options: nil),
+              let function = library.makeFunction(name: "edgeai_dot_product"),
+              let pipeline = try? device.makeComputePipelineState(function: function) else {
+            return nil
+        }
+
+        self.device = device
+        self.commandQueue = commandQueue
+        self.pipeline = pipeline
+        #else
+        return nil
+        #endif
+    }
+
+    public func dot(_ left: [Float], _ right: [Float]) -> Float? {
+        precondition(left.count == right.count, "Vectors must have the same dimensionality.")
+        guard !left.isEmpty else { return 0 }
+
+        #if canImport(Metal)
+        let byteCount = left.count * MemoryLayout<Float>.stride
+        guard let leftBuffer = left.withUnsafeBufferPointer({ pointer in
+            pointer.baseAddress.map {
+                device.makeBuffer(bytes: $0, length: byteCount, options: .storageModeShared)
+            } ?? nil
+        }),
+              let rightBuffer = right.withUnsafeBufferPointer({ pointer in
+                  pointer.baseAddress.map {
+                      device.makeBuffer(bytes: $0, length: byteCount, options: .storageModeShared)
+                  } ?? nil
+              }),
+              let partialBuffer = device.makeBuffer(length: byteCount, options: .storageModeShared),
+              var count = UInt32(exactly: left.count),
+              let commandBuffer = commandQueue.makeCommandBuffer(),
+              let encoder = commandBuffer.makeComputeCommandEncoder() else {
+            return nil
+        }
+
+        encoder.setComputePipelineState(pipeline)
+        encoder.setBuffer(leftBuffer, offset: 0, index: 0)
+        encoder.setBuffer(rightBuffer, offset: 0, index: 1)
+        encoder.setBuffer(partialBuffer, offset: 0, index: 2)
+        encoder.setBytes(&count, length: MemoryLayout<UInt32>.stride, index: 3)
+
+        let threads = MTLSize(width: left.count, height: 1, depth: 1)
+        let threadgroupWidth = min(pipeline.maxTotalThreadsPerThreadgroup, 256)
+        let threadgroup = MTLSize(width: threadgroupWidth, height: 1, depth: 1)
+        encoder.dispatchThreads(threads, threadsPerThreadgroup: threadgroup)
+        encoder.endEncoding()
+        commandBuffer.commit()
+        commandBuffer.waitUntilCompleted()
+
+        guard commandBuffer.error == nil else {
+            return nil
+        }
+
+        let partials = partialBuffer.contents().bindMemory(to: Float.self, capacity: left.count)
+        return UnsafeBufferPointer(start: partials, count: left.count).reduce(Float(0), +)
+        #else
+        return nil
+        #endif
     }
 }

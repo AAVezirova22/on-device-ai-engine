@@ -5,10 +5,12 @@
 On-Device AI Engine is organized as a native Swift package with three executable surfaces:
 
 1. `EdgeAIEngine`: reusable library containing document loading, chunking, embeddings, vector search, index persistence, RAG orchestration, resource guardrails, and LLM adapters.
-2. `edgeai`: command-line interface for indexing, inspecting, searching, and asking questions.
-3. `edgeai-hotkey`: macOS helper that registers a system-wide hotkey and summarizes clipboard text.
+2. `EdgeAINativeKernels`: C++ kernel target used by Swift for native vector scoring.
+3. `EdgeAIIOS`: SwiftUI workspace target for importing documents, building a local index, and asking local questions from an iOS app shell.
+4. `edgeai`: command-line interface for indexing, inspecting, searching, and asking questions.
+5. `edgeai-hotkey`: macOS helper that registers a system-wide hotkey and summarizes clipboard text.
 
-The core design rule is separation of concerns. Retrieval, generation, storage, and OS integration are independent modules. This lets the project run today with a deterministic fallback while leaving a clean path to MLX Swift, Core ML, direct llama.cpp bindings, or Metal-backed inference.
+The core design rule is separation of concerns. Retrieval, generation, storage, acceleration, and OS integration are independent modules. This keeps the engine usable with deterministic offline generation, local semantic embeddings, C++ scoring, Metal scoring, and a local llama.cpp server adapter.
 
 ## Runtime data flow
 
@@ -38,6 +40,9 @@ Answer with citations
 
 ```text
 Sources/
+  EdgeAINativeKernels/
+    EdgeAINativeKernels.cpp
+    include/EdgeAINativeKernels.h
   EdgeAIEngine/
     DocumentLoader.swift
     EdgeAIConfiguration.swift
@@ -47,6 +52,7 @@ Sources/
     IndexStore.swift
     LocalDocument.swift
     LocalLLM.swift
+    LocalRuntime.swift
     RAGEngine.swift
     RecursiveChunker.swift
     ResourceGuard.swift
@@ -57,11 +63,12 @@ Sources/
     main.swift
   EdgeAIHotkey/
     main.swift
+  EdgeAIIOS/
+    EdgeAIWorkspaceView.swift
 Tests/
   EdgeAIEngineTests/
     EdgeAIEngineTests.swift
 docs/
-sample_docs/
 scripts/
 ```
 
@@ -125,13 +132,6 @@ Implemented backends:
 
 The hash backend is useful for learning, tests, and reproducible fallback behavior. The NaturalLanguage backend is the first real semantic local embedding option in the project.
 
-Production replacement points:
-
-- MLX Swift embedding model.
-- Core ML embedding model.
-- llama.cpp embedding endpoint.
-- Direct C++ embedding backend.
-
 New indexes record the embedding backend in the manifest. Query commands recreate the backend from the manifest so an index built with `natural` is queried with `natural`, and an index built with `hash` is queried with `hash`.
 
 ### `VectorIndex.swift`
@@ -143,7 +143,28 @@ Stores `IndexedChunk` records:
 
 Search embeds the query and computes dot product against stored vectors. Because vectors are normalized, dot product approximates cosine similarity.
 
-This is exact linear search. It is simple and reliable for small/medium local indexes. For large corpora, replace this with approximate nearest-neighbor search.
+Implemented search modes:
+
+- `exact`: scans every indexed vector.
+- `approximate`: uses deterministic locality-sensitive hashing to select candidates, then scores candidates exactly.
+- `auto`: exact search for smaller indexes, approximate candidate search for larger indexes.
+
+Implemented scoring backends:
+
+- `swift`: pure Swift dot product.
+- `native-cxx`: C++ dot-product kernel exposed to Swift.
+- `metal`: runtime Metal compute kernel.
+- `auto`: Metal when available, otherwise native C++.
+
+### `EdgeAINativeKernels`
+
+Provides the C++ scoring function imported into Swift:
+
+```cpp
+float edgeai_dot_product_f32(const float *left, const float *right, int32_t count);
+```
+
+The Swift layer uses this through `NativeVectorKernels.dot`.
 
 ### `IndexBuilder.swift`
 
@@ -193,7 +214,7 @@ The fingerprint is currently a stable FNV-1a hash of extracted text. It is used 
 
 Coordinates retrieval and generation.
 
-`retrieve(question:topK:minimumScore:)` returns matching chunks without calling a model.
+`retrieve(question:topK:minimumScore:searchMode:scoringBackend:)` returns matching chunks without calling a model.
 
 `answer(question:options:)`:
 
@@ -202,6 +223,17 @@ Coordinates retrieval and generation.
 3. builds a grounded prompt,
 4. calls the configured `LocalLLM`,
 5. returns answer, citations, and retrieval timing.
+
+### `EdgeAIIOS/EdgeAIWorkspaceView.swift`
+
+Provides a SwiftUI workspace UI and `EdgeAIWorkspaceViewModel`.
+
+The view model:
+
+1. receives imported local document URLs,
+2. builds an in-memory index with the shared `IndexBuilder`,
+3. asks questions through the shared `RAGEngine`,
+4. exposes status, manifest metadata, and answers to SwiftUI.
 
 ### `LocalLLM.swift`
 
@@ -217,6 +249,17 @@ Implemented backends:
 
 - `ExtractiveLocalLLM`: deterministic local fallback.
 - `LlamaCppServerClient`: HTTP adapter for a local llama.cpp server.
+
+### `LocalRuntime.swift`
+
+Defines runtime capability reporting for:
+
+- built-in extractive fallback,
+- llama.cpp server mode,
+- native llama.cpp build-time integration,
+- MLX Swift build-time integration.
+
+The CLI exposes these checks through `edgeai runtimes`, and `doctor` includes runtime status in its readiness report.
 
 ### `ResourceGuard.swift`
 
@@ -257,6 +300,7 @@ Commands:
 - `ask`: retrieve context and generate an answer.
 - `benchmark`: measure index build and retrieval latency.
 - `resources`: print thermal/memory resource snapshot.
+- `runtimes`: print local runtime capability status.
 - `doctor`: validate configuration, resource state, embedding backend, index integrity, and llama.cpp connectivity.
 - `model-info`: inspect configured local model metadata.
 - `llama-command`: generate a `llama-server` command from config/flags.
@@ -286,13 +330,13 @@ built-in defaults < config file < explicit CLI flags
 8. writes the answer back to the clipboard,
 9. updates menu-bar status text.
 
-`scripts/package-macos-app.sh` packages the release executable into an unsigned `.app` bundle with `LSUIElement` enabled so it behaves as a menu-bar utility.
+`scripts/package-macos-app.sh` packages the release executable into a `.app` bundle with `LSUIElement` enabled so it behaves as a menu-bar utility.
 
 The Preferences action is implemented with AppKit controls and writes `EdgeAIConfiguration` back to `.edgeai/config.json`, then re-registers the global hotkey.
 
 For external distribution, the generated app still needs Developer ID code signing and notarization.
 
-Launch at Login is implemented through `SMAppService.mainApp` from ServiceManagement. It is available in signed app bundles and may fail with a signature error in unsigned development builds.
+Launch at Login is implemented through `SMAppService.mainApp` from ServiceManagement and is intended for signed app bundles.
 
 ## Technology choices
 
@@ -322,11 +366,11 @@ Used by the menu-bar app for Launch at Login registration through `SMAppService.
 
 ### llama.cpp
 
-Supported through HTTP server mode. This avoids vendoring C++ code in the first production-oriented stage while preserving a clean boundary for local quantized models.
+Supported through HTTP server mode. This keeps model execution in a local `llama-server` process while the Swift engine handles retrieval, prompt assembly, configuration, and operational checks.
 
-### Metal / MLX Swift / Core ML
+### Metal
 
-These are planned backend upgrades. The current architecture is designed so they can replace the educational embedding/backend implementations without rewriting the product flow.
+Metal is used for vector dot-product scoring through a runtime compute pipeline. The scorer is selected with `--scoring metal`, or automatically when `--scoring auto` detects a usable Metal device.
 
 ## Privacy and security architecture
 
@@ -344,14 +388,8 @@ The only model network path is explicit `--llama-server`. For private documents,
 Current complexity:
 
 - indexing: O(number of chunks × embedding dimensions),
-- retrieval: O(number of chunks × embedding dimensions),
+- exact retrieval: O(number of chunks × embedding dimensions),
+- approximate retrieval: locality-sensitive hashing candidate lookup plus exact scoring inside the candidate set,
 - storage: JSON, optimized for transparency rather than compactness.
 
-This is acceptable for learning, demos, and small/medium document collections. Scaling roadmap:
-
-1. binary index format,
-2. memory-mapped vectors,
-3. approximate nearest-neighbor search,
-4. real semantic embeddings,
-5. direct local inference backend,
-6. Metal/MLX profiling and optimization.
+This structure keeps the implementation inspectable while still supporting accelerated local retrieval paths.

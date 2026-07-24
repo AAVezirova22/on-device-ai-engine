@@ -1,26 +1,28 @@
 # On-Device AI Engine
 
-Native Swift local AI engine for privacy-first document Q&A and productivity workflows on macOS.
+Native Swift local AI engine for privacy-first document Q&A and productivity workflows on Apple platforms.
 
 The project indexes local Markdown, text, and PDF files, retrieves relevant passages with local vector search, and answers with source citations through either:
 
 - a deterministic offline fallback, or
 - a local `llama.cpp` server.
 
-It also includes a macOS global-hotkey clipboard summarization demo.
+It also includes a macOS menu-bar assistant with a configurable global hotkey for clipboard summarization and a SwiftUI iOS workspace view for embedding the engine in an iOS app.
 
 ## Quick start
 
+Use any local folder containing Markdown, text, or PDF files:
+
 ```bash
 swift test
-swift run edgeai index --input sample_docs --output .edgeai/index.json
+swift run edgeai index --input ~/Documents/Notes --output .edgeai/index.json
 swift run edgeai inspect --index .edgeai/index.json
-swift run edgeai search --index .edgeai/index.json --query "thermal safeguards"
+swift run edgeai search --index .edgeai/index.json --query "project risks"
 swift run edgeai ask --index .edgeai/index.json --question "What are the action items?"
-swift run edgeai benchmark --input sample_docs --query "thermal safeguards"
+swift run edgeai benchmark --input ~/Documents/Notes --query "project risks"
 ```
 
-Run the full smoke test:
+Run the full local smoke test:
 
 ```bash
 scripts/smoke-test.sh
@@ -32,7 +34,7 @@ Run the release gate:
 scripts/release-check.sh
 ```
 
-Package the unsigned macOS menu-bar app:
+Package the macOS menu-bar app:
 
 ```bash
 scripts/package-macos-app.sh
@@ -48,6 +50,7 @@ edgeai search  --query "..." [--index .edgeai/index.json] [--json]
 edgeai ask     --question "..." [--index .edgeai/index.json] [--json]
 edgeai benchmark --input <path> [--query "..."] [--json]
 edgeai resources [--json]
+edgeai runtimes [--json]
 edgeai doctor [--config .edgeai/config.json] [--json]
 edgeai model-info [--model ./models/model.gguf] [--json]
 edgeai llama-command [--model ./models/model.gguf] [--json]
@@ -59,48 +62,80 @@ edgeai version
 Configuration files are supported:
 
 ```bash
-swift run edgeai init-config --output .edgeai/config.json --input sample_docs
+swift run edgeai init-config --output .edgeai/config.json --input ~/Documents/Notes
 swift run edgeai index --config .edgeai/config.json
 swift run edgeai ask --config .edgeai/config.json --question "What are the action items?"
 ```
 
 Precedence is: built-in defaults, then config file, then explicit CLI flags.
 
-Use Apple’s local NaturalLanguage embeddings for semantic retrieval:
+## Retrieval and acceleration
+
+Embedding backends:
+
+- `hash`: deterministic local feature-hashing backend for reproducible tests and offline fallback.
+- `natural`: Apple NaturalLanguage semantic embeddings when available on the machine.
+
+Search modes:
+
+- `exact`: linear scan over all vectors.
+- `approximate`: locality-sensitive hashing candidate selection, then exact scoring inside the candidate set.
+- `auto`: exact for smaller indexes, approximate for larger indexes.
+
+Scoring backends:
+
+- `swift`: pure Swift dot product.
+- `native-cxx`: C++ dot-product kernel exposed to Swift through SwiftPM.
+- `metal`: runtime Metal compute kernel.
+- `auto`: Metal when available, otherwise native C++.
+
+Example:
 
 ```bash
 swift run edgeai index \
-  --input sample_docs \
+  --input ~/Documents/Notes \
   --output .edgeai/natural-index.json \
   --embedding natural
+
+swift run edgeai search \
+  --index .edgeai/natural-index.json \
+  --query "thermal safeguards" \
+  --search-mode approximate \
+  --scoring metal
 ```
 
-The default `hash` backend is deterministic and portable. The `natural` backend is semantic and fully on-device, but depends on Apple’s NaturalLanguage embeddings being available on the machine.
+## Local model usage
 
-The menu-bar app hotkey is configurable in `.edgeai/config.json`:
-
-```json
-{
-  "hotkey": {
-    "key": "s",
-    "modifiers": ["control", "option", "command"]
-  }
-}
-```
-
-Use a local model:
+Generate a local `llama-server` command:
 
 ```bash
 swift run edgeai llama-command --model ./models/model.gguf
+```
+
+Ask through that local server:
+
+```bash
 swift run edgeai ask \
   --index .edgeai/index.json \
   --question "Summarize the local documents" \
   --llama-server http://127.0.0.1:8080
 ```
 
+By default, the engine does not make network requests. A request is made only when you explicitly configure a `--llama-server` URL.
+
+Inspect local runtime support in the current build:
+
+```bash
+swift run edgeai runtimes
+```
+
 ## What is implemented
 
 - Native Swift package with library, CLI, and hotkey/menu-bar app targets.
+- SwiftUI iOS workspace target for importing documents, building an index, and asking local questions.
+- Native C++ vector scoring kernel integrated through SwiftPM.
+- Runtime Metal compute scoring backend.
+- Exact and approximate vector search.
 - Unsigned macOS menu-bar app packaging for the clipboard assistant.
 - Configurable menu-bar app hotkey.
 - Launch at Login menu support for signed builds.
@@ -114,8 +149,9 @@ swift run edgeai ask \
 - Retrieval-only search command for debugging answer quality.
 - RAG prompt construction with citations.
 - llama.cpp HTTP adapter.
+- Runtime registry for extractive, llama.cpp server, native llama.cpp, and MLX Swift integration paths.
 - Local GGUF model metadata and llama-server command generation.
-- Deterministic offline fallback for demos and tests.
+- Deterministic offline fallback for tests and model-free use.
 - Thermal-aware retrieval limits.
 - Runtime resource snapshots for thermal state and resident memory.
 - Benchmark command for build/retrieval latency.
@@ -123,7 +159,7 @@ swift run edgeai ask \
 - Project configuration file support.
 - Maximum input-size guard.
 - JSON output for CLI automation.
-- Unit tests and smoke-test script.
+- Unit tests, smoke test, release check, packaging script, and signing/notarization script.
 
 ## Documentation
 
@@ -131,22 +167,18 @@ swift run edgeai ask \
 - [Architecture](docs/ARCHITECTURE.md)
 - [Operations guide](docs/OPERATIONS.md)
 - [Learning guide](docs/LEARNING_GUIDE.md)
-- [Production readiness](docs/PRODUCTION_READINESS.md)
 - [Release guide](docs/RELEASE.md)
-- [Portfolio notes](docs/PORTFOLIO.md)
+- [Portfolio summary](docs/PORTFOLIO.md)
 
 ## Project structure
 
 ```text
-Sources/EdgeAIEngine       Core RAG, embeddings, indexing, storage, LLM adapters
-Sources/EdgeAIEngineCLI    Command-line interface
-Sources/EdgeAIHotkey       macOS menu-bar clipboard assistant
-Tests/EdgeAIEngineTests    Unit tests
-docs                       Product, architecture, learning, and operations docs
-sample_docs                Demo corpus
-scripts                    Smoke test and operational helpers
+Sources/EdgeAIEngine          Core RAG, embeddings, indexing, storage, LLM adapters
+Sources/EdgeAINativeKernels   C++ scoring kernels used by Swift
+Sources/EdgeAIEngineCLI       Command-line interface
+Sources/EdgeAIHotkey          macOS menu-bar clipboard assistant
+Sources/EdgeAIIOS             SwiftUI iOS workspace UI
+Tests/EdgeAIEngineTests       Unit tests
+docs                          Product, architecture, learning, and operations docs
+scripts                       Smoke test and operational helpers
 ```
-
-## Important scope note
-
-This repository currently implements the native Swift RAG engine and local llama.cpp server integration. It does not yet implement custom Metal kernels, direct C++ llama.cpp bindings, or MLX Swift inference. Those are documented roadmap items, not current claims.
