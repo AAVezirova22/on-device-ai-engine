@@ -41,6 +41,30 @@ scripts/release-check.sh
 
 The release check runs tests, the smoke test, a release build, and sanity checks against the release binary.
 
+## Normal user workflow
+
+Use this path first. It hides most of the advanced flags.
+
+```bash
+swift run edgeai setup ~/Documents/Notes
+swift run edgeai ask "What are the action items?"
+swift run edgeai find "project risks"
+swift run edgeai files
+```
+
+What each command does:
+
+- `setup <folder>` indexes the folder and saves default settings.
+- `ask "..."` answers from the indexed files.
+- `find "..."` shows matching source passages.
+- `files` shows what was indexed.
+
+If `ask`, `find`, or `files` says no index exists, run `setup` first.
+
+## Advanced commands
+
+The commands below are for debugging, automation, benchmarking, and custom configuration.
+
 ## Index documents
 
 ```bash
@@ -429,7 +453,7 @@ Current packaging status:
 
 For distribution outside your own machine, add Developer ID signing and notarization.
 
-Launch at Login uses Apple’s ServiceManagement framework. It generally requires a signed app bundle to register successfully. Unsigned local builds expose the menu item but may show a signing-related error when enabling it.
+Launch at Login uses Apple’s ServiceManagement framework and is intended for signed app bundles.
 
 ## Troubleshooting
 

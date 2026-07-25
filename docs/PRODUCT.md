@@ -118,7 +118,7 @@ The repository implements a native local RAG engine with operational tooling:
 - Unit tests, smoke-test script, and release-check script.
 - Local llama.cpp server adapter.
 - Model metadata and llama-server command generation commands.
-- Unsigned macOS menu-bar app packaging.
+- macOS menu-bar app packaging.
 - Developer ID signing and notarization script for credentialed distribution.
 - Configurable hotkey support through `.edgeai/config.json`.
 - Launch at Login menu support through ServiceManagement.

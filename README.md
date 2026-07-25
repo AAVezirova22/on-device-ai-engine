@@ -11,15 +11,32 @@ It also includes a macOS menu-bar assistant with a configurable global hotkey fo
 
 ## Quick start
 
-Use any local folder containing Markdown, text, or PDF files:
+First, open Terminal in the project folder:
+
+```bash
+cd (path)/On-DeviceAiEngine
+```
+
+Then use the simple workflow with any folder containing Markdown, text, or PDF files:
+
+```bash
+swift run edgeai setup ~/Documents/Notes (example path)
+swift run edgeai ask "What are the action items?"
+swift run edgeai find "project risks"
+swift run edgeai files
+```
+
+That is the normal user path:
+
+1. `setup` teaches the app which folder to use and builds the local index.
+2. `ask` answers a question from the indexed files.
+3. `find` shows matching source passages.
+4. `files` shows what was indexed.
+
+Run tests only when you are checking the code:
 
 ```bash
 swift test
-swift run edgeai index --input ~/Documents/Notes --output .edgeai/index.json
-swift run edgeai inspect --index .edgeai/index.json
-swift run edgeai search --index .edgeai/index.json --query "project risks"
-swift run edgeai ask --index .edgeai/index.json --question "What are the action items?"
-swift run edgeai benchmark --input ~/Documents/Notes --query "project risks"
 ```
 
 Run the full local smoke test:
@@ -44,10 +61,19 @@ open "dist/On-Device AI Engine.app"
 ## Main commands
 
 ```bash
-edgeai index   --input <path> [--output .edgeai/index.json]
+edgeai setup <path>
+edgeai ask "..."
+edgeai find "..."
+edgeai files
+```
+
+Advanced commands:
+
+```bash
+edgeai index --input <path> [--output .edgeai/index.json]
 edgeai inspect [--index .edgeai/index.json] [--json]
-edgeai search  --query "..." [--index .edgeai/index.json] [--json]
-edgeai ask     --question "..." [--index .edgeai/index.json] [--json]
+edgeai search --query "..." [--index .edgeai/index.json] [--json]
+edgeai ask --question "..." [--index .edgeai/index.json] [--json]
 edgeai benchmark --input <path> [--query "..."] [--json]
 edgeai resources [--json]
 edgeai runtimes [--json]
@@ -136,7 +162,7 @@ swift run edgeai runtimes
 - Native C++ vector scoring kernel integrated through SwiftPM.
 - Runtime Metal compute scoring backend.
 - Exact and approximate vector search.
-- Unsigned macOS menu-bar app packaging for the clipboard assistant.
+- macOS menu-bar app packaging for the clipboard assistant.
 - Configurable menu-bar app hotkey.
 - Launch at Login menu support for signed builds.
 - Privacy and permissions onboarding in the menu-bar app.
@@ -166,9 +192,7 @@ swift run edgeai runtimes
 - [Product documentation](docs/PRODUCT.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Operations guide](docs/OPERATIONS.md)
-- [Learning guide](docs/LEARNING_GUIDE.md)
 - [Release guide](docs/RELEASE.md)
-- [Portfolio summary](docs/PORTFOLIO.md)
 
 ## Project structure
 

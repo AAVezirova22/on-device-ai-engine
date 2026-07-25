@@ -146,6 +146,25 @@ final class EdgeAIEngineTests: XCTestCase {
         XCTAssertEqual(answer.citations.first?.chunk.title, "RAG")
     }
 
+    func testExtractiveFallbackDoesNotIncludeImplementationNotes() async throws {
+        let text = """
+        In two interviews in the 1980s, King said that, of all his books, 'Salem's Lot was his favorite. In his June 1983 Playboy interview, the interviewer mentioned that because it was his favorite, King was planning a sequel, but King has said on his website that because The Dark Tower series already continued the narrative in Wolves of the Calla and Song of Susannah, he felt there was no longer a need for a sequel. In 1987, he told Phil Konstantin in The Highway Patrolman magazine: "In a way it is my favorite story, mostly because of what it says about small towns. They are kind of a dying organism right now. The story seems sort of down home to me. I have a special cold spot in my heart for it!"
+        """
+        let model = HashEmbeddingModel(dimensions: 128)
+        var index = VectorIndex(embeddingDimensions: model.dimensions)
+        index.add([
+            DocumentChunk(sourcePath: "clipboard", title: "Clipboard", text: text, chunkIndex: 0)
+        ], using: model)
+
+        let engine = RAGEngine(index: index, embeddingModel: model, llm: ExtractiveLocalLLM())
+        let answer = try await engine.answer(question: "Summarize this text and extract action items.", topK: 1)
+
+        XCTAssertFalse(answer.answer.contains("Offline extractive answer"))
+        XCTAssertFalse(answer.answer.contains("Note:"))
+        XCTAssertFalse(answer.answer.contains("llama.cpp"))
+        XCTAssertTrue(answer.answer.hasPrefix("- "))
+    }
+
     func testIndexBuilderCreatesValidatedManifest() throws {
         let tempDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

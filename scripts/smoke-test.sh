@@ -24,12 +24,16 @@ swift test
 swift run edgeai resources
 swift run edgeai runtimes
 swift run edgeai runtimes --json
+swift run edgeai setup "${FIXTURE_DIR}" --output "${INDEX_PATH}" --config "${CONFIG_PATH}"
+swift run edgeai files --index "${INDEX_PATH}"
+swift run edgeai find "thermal safeguards" --index "${INDEX_PATH}"
+swift run edgeai ask "What are the action items?" --index "${INDEX_PATH}"
 swift run edgeai init-config --output "${CONFIG_PATH}" --input "${FIXTURE_DIR}" --search-mode approximate --scoring native-cxx
 swift run edgeai show-config --config "${CONFIG_PATH}"
 swift run edgeai index --config "${CONFIG_PATH}" --output "${INDEX_PATH}"
 swift run edgeai index --input "${FIXTURE_DIR}" --output "${INDEX_PATH}"
-swift run edgeai doctor --index "${INDEX_PATH}" --require-index
-swift run edgeai doctor --index "${INDEX_PATH}" --require-index --json
+swift run edgeai doctor --config "${CONFIG_PATH}" --index "${INDEX_PATH}" --require-index
+swift run edgeai doctor --config "${CONFIG_PATH}" --index "${INDEX_PATH}" --require-index --json
 swift run edgeai llama-command --model "${FIXTURE_DIR}/meeting-notes.md" --context-size 1024
 swift run edgeai model-info --model "${FIXTURE_DIR}/meeting-notes.md" --json
 swift run edgeai inspect --index "${INDEX_PATH}"

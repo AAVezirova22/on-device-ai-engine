@@ -12,13 +12,15 @@ struct EdgeAICommand {
             }
 
             switch command {
+            case "setup", "add":
+                try await setup(arguments: Array(arguments.dropFirst()))
             case "index":
                 try await index(arguments: Array(arguments.dropFirst()))
-            case "ask":
+            case "ask", "chat", "q":
                 try await ask(arguments: Array(arguments.dropFirst()))
-            case "search":
+            case "search", "find":
                 try search(arguments: Array(arguments.dropFirst()))
-            case "inspect":
+            case "inspect", "files", "status":
                 try inspect(arguments: Array(arguments.dropFirst()))
             case "benchmark":
                 try benchmark(arguments: Array(arguments.dropFirst()))
@@ -46,6 +48,57 @@ struct EdgeAICommand {
         } catch {
             fputs("error: \(error)\n", stderr)
             exit(1)
+        }
+    }
+
+    private static func setup(arguments: [String]) async throws {
+        let parser = ArgumentParser(arguments)
+        var configuration = try loadConfiguration(parser: parser)
+        let inputPaths = parser.values(for: "--input") + parser.positionalArguments
+        let outputPath = parser.value(for: "--output") ?? configuration.indexPath
+        let configPath = parser.value(for: "--config") ?? EdgeAIConfigurationStore.defaultPath
+        let embeddingName = parser.value(for: "--embedding") ?? configuration.embeddingModel
+        let json = parser.hasFlag("--json")
+
+        guard !inputPaths.isEmpty else {
+            throw CLIError.message("""
+            setup needs a folder or file path.
+
+            Example:
+              swift run edgeai setup ~/Documents/Notes
+            """)
+        }
+
+        configuration.indexPath = outputPath
+        configuration.inputPaths = inputPaths
+        configuration.embeddingModel = embeddingName
+
+        let embeddingModel = try EmbeddingModelFactory.make(identifier: embeddingName)
+        let result = try IndexBuilder.build(
+            inputURLs: inputPaths.map { URL(fileURLWithPath: $0) },
+            embeddingModel: embeddingModel,
+            chunking: configuration.chunking,
+            resourceGuard: resourceGuard(parser: parser, configuration: configuration)
+        )
+
+        try IndexStore.save(result.storedIndex, to: URL(fileURLWithPath: outputPath))
+        try EdgeAIConfigurationStore.save(configuration, to: URL(fileURLWithPath: configPath))
+
+        if json {
+            try printJSON(SetupCommandResponse(
+                indexPath: outputPath,
+                configPath: configPath,
+                manifest: result.storedIndex.manifest
+            ))
+        } else {
+            print("Ready.")
+            print("Indexed \(result.storedIndex.manifest.documentCount) documents into \(result.storedIndex.manifest.chunkCount) chunks.")
+            print("Saved index: \(outputPath)")
+            print("Saved settings: \(configPath)")
+            print("")
+            print("Next:")
+            print("  swift run edgeai ask \"What are the action items?\"")
+            print("  swift run edgeai find \"project risks\"")
         }
     }
 
@@ -104,7 +157,7 @@ struct EdgeAICommand {
             throw CLIError.message("ask requires --question or a positional question.")
         }
 
-        let stored = try IndexStore.load(from: URL(fileURLWithPath: indexPath))
+        let stored = try loadStoredIndex(at: indexPath)
         let embeddingModel = try EmbeddingModelFactory.make(
             identifier: stored.manifest.embeddingModel,
             dimensions: stored.index.embeddingDimensions
@@ -168,7 +221,7 @@ struct EdgeAICommand {
             throw CLIError.message("search requires --query or a positional query.")
         }
 
-        let stored = try IndexStore.load(from: URL(fileURLWithPath: indexPath))
+        let stored = try loadStoredIndex(at: indexPath)
         let embeddingModel = try EmbeddingModelFactory.make(
             identifier: stored.manifest.embeddingModel,
             dimensions: stored.index.embeddingDimensions
@@ -201,7 +254,7 @@ struct EdgeAICommand {
         let configuration = try loadConfiguration(parser: parser)
         let indexPath = parser.value(for: "--index") ?? configuration.indexPath
         let json = parser.hasFlag("--json")
-        let stored = try IndexStore.load(from: URL(fileURLWithPath: indexPath))
+        let stored = try loadStoredIndex(at: indexPath)
 
         if json {
             try printJSON(stored.manifest)
@@ -573,11 +626,18 @@ struct EdgeAICommand {
         print("""
         edgeai — privacy-first offline RAG engine for local documents
 
+        Simple workflow:
+          edgeai setup ~/Documents/Notes
+          edgeai ask "What are the action items?"
+          edgeai find "project risks"
+          edgeai files
+
         Commands:
+          edgeai setup <path>                         Index files and save default settings.
           edgeai index --input <path> [--input <path>] [--output .edgeai/index.json]
-          edgeai ask --question "What are the action items?" [--index .edgeai/index.json]
-          edgeai search --query "thermal safeguards" [--index .edgeai/index.json]
-          edgeai inspect [--index .edgeai/index.json]
+          edgeai ask "What are the action items?" [--index .edgeai/index.json]
+          edgeai find "thermal safeguards" [--index .edgeai/index.json]
+          edgeai files [--index .edgeai/index.json]
           edgeai benchmark --input <path> [--query "..."]
           edgeai resources
           edgeai runtimes
@@ -677,6 +737,22 @@ struct EdgeAICommand {
         let path = parser.value(for: "--config") ?? EdgeAIConfigurationStore.defaultPath
         let url = URL(fileURLWithPath: path)
         return try EdgeAIConfigurationStore.loadIfPresent(from: url) ?? .default
+    }
+
+    private static func loadStoredIndex(at path: String) throws -> StoredIndex {
+        guard FileManager.default.fileExists(atPath: path) else {
+            throw CLIError.message("""
+            No local index found at \(path).
+
+            First run:
+              swift run edgeai setup <folder>
+
+            Example:
+              swift run edgeai setup ~/Documents/Notes
+            """)
+        }
+
+        return try IndexStore.load(from: URL(fileURLWithPath: path))
     }
 
     private static func resourceGuard(
@@ -802,6 +878,12 @@ struct ArgumentParser {
 
 struct IndexCommandResponse: Codable {
     let indexPath: String
+    let manifest: IndexManifest
+}
+
+struct SetupCommandResponse: Codable {
+    let indexPath: String
+    let configPath: String
     let manifest: IndexManifest
 }
 

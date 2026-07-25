@@ -46,12 +46,9 @@ public struct ExtractiveLocalLLM: LocalLLM {
             return "I could not find enough local context to answer that. Add relevant files to the index or lower the retrieval threshold."
         }
 
-        return """
-        Offline extractive answer:
-        \(ranked.map { "- \(stripBulletMarker($0))" }.joined(separator: "\n"))
-
-        Note: this answer used the built-in deterministic fallback. Start a local llama.cpp server and pass --llama-server for generative answers.
-        """
+        return ranked
+            .map { "- \(stripBulletMarker($0))" }
+            .joined(separator: "\n")
     }
 
     private func candidatePassages(_ text: String) -> [String] {
